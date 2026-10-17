@@ -1,0 +1,36 @@
+# pulseq_plato settings: the scanner's reference scan parameters, run against
+# the LOCAL simulator (plato/bin/simulator.exe, ports of plato/bin/sim_modules.txt).
+#
+#   build/pulseq_plato -f config/sim_reference.yml
+#   build/pulseq_plato -f config/sim_reference.yml other.seq -o other   # overrides
+#
+# Same values as the vendor command that imaged on the scanner:
+#   pulseq.exe -o gre01 -gx 57290000 -gy 61090000 -gz 60712000 -ptsmask 77
+#              -rfmax 100 -f 27998450 -m modules.txt -cic off -rxmask 1 -txmask 1
+
+sequence: ../test/seqs/fid_v150.seq    # relative to this file
+output: fid_sim                        # writes fid_sim_0.cfl (relative to the working dir)
+
+rf:
+  pts_mask: 77                         # -ptsmask PTS base 270 MHz (C:\smis\smis.ini)
+  frequency_hz: 27998450               # -f       NCO frequency = offset from the
+                                       #          base (Tx and Rx): 297.998450 MHz
+  max_amplitude_hz: 100                # -rfmax   B1 (Hz) at full-scale RF
+
+gradients:
+  max_hz_per_m:                        # -gx -gy -gz  Hz/m at full-scale DAC
+    x: 57290000
+    y: 61090000
+    z: 60712000
+
+channels:
+  tx_mask: 1                           # bit i = transmitter i (Tx0)
+  rx_mask: 1                           # bit i = receiver i (Rx0)
+
+receiver:
+  cic: off                             # CIC compensation FIR (decimates by 4)
+
+modules:                               # first entry is the master module
+  - {name: MR4600, ip: 127.0.0.1, port: 21700}   # gradients + uncommitted I/O
+  - {name: MR4610, ip: 127.0.0.1, port: 21701}   # RF transmit
+  - {name: MR4620, ip: 127.0.0.1, port: 21702}   # RF receive

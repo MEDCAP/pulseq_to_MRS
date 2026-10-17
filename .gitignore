@@ -1,0 +1,10 @@
+# CMake/Ninja build tree (also holds the pypulseq venv, build/pyenv)
+build/
+
+# Tests, simulator logs and golden logs, test scripts and sequences, scanner
+# data, reconstructions and findings notes: local only, not source
+test/
+
+# Python caches
+__pycache__/
+*.pyc

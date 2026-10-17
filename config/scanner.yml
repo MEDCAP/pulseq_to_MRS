@@ -1,0 +1,34 @@
+# pulseq_plato settings for the REAL SCANNER (MR46xx modules on 10.0.0.x).
+#
+# !! Running with this file drives the scanner hardware. Only use it at the
+# !! scanner, on purpose. For testing use config/sim_reference.yml.
+#
+#   build/pulseq_plato -f config/scanner.yml path/to/gre.seq -o gre01
+#
+# Module addresses are those of plato/bin/modules.txt. Scan parameters are the
+# ones of the vendor command that imaged on this scanner:
+#   pulseq.exe -o gre01 -gx 57290000 -gy 61090000 -gz 60712000 -ptsmask 77
+#              -rfmax 100 -f 27998450 -m modules.txt -cic off -rxmask 1 -txmask 1
+# No 'sequence' here on purpose: give the .seq on the command line.
+
+output: gre01
+
+rf:
+  pts_mask: 77                         # PTS base 270 MHz (C:\smis\smis.ini)
+  frequency_hz: 27998450               # offset from the base: 297.998450 MHz
+  max_amplitude_hz: 100
+
+gradients:
+  max_hz_per_m: {x: 57290000, y: 61090000, z: 60712000}
+
+channels:
+  tx_mask: 1
+  rx_mask: 1
+
+receiver:
+  cic: off
+
+modules:
+  - {name: MR4600, ip: 10.0.0.100, port: 4700}
+  - {name: MR4610, ip: 10.0.0.101, port: 4700}
+  - {name: MR4620, ip: 10.0.0.104, port: 4700}
