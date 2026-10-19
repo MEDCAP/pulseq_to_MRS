@@ -13,7 +13,9 @@
 #include <sequence_component_mapping.hpp>
 #include <spectrometer.hpp>
 
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <functional>
 #include <cstdlib>
@@ -28,6 +30,13 @@
 namespace probe {
 
 using namespace mrs::plato;
+
+// Ctrl+C: Session::Run stops the sequence runner instead of the process dying
+// with the realtime program still running on the hardware. Opt-in per probe.
+inline std::atomic<bool> gStopRequested{false};
+inline void InstallCtrlCStop() {
+  std::signal(SIGINT, [](int) { gStopRequested = true; });
+}
 
 struct Component {
   std::string name;
@@ -125,6 +134,11 @@ public:
     bool allDone = false;
     bool simulatorGone = false;
     while (!allDone && std::chrono::steady_clock::now() < deadline) {
+      if (gStopRequested) {
+        std::fprintf(stderr, "Ctrl+C: stopping the sequence runner\n");
+        (void)runner->Stop();
+        break;
+      }
       allDone = true;
       for (const auto& c : components) {
         bool running = true;
