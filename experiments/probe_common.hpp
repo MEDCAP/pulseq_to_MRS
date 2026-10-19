@@ -1,7 +1,8 @@
 // Shared harness for the Phase 0 simulator probes.
 //
 // Connects to the three simulated modules of plato/bin/sim_modules.txt
-// (MR4600 @21700, MR4610 @21701, MR4620 @21702), compiles a sequence, runs it
+// (MR4600 @21700, MR4610 @21701, MR4620 @21702) or to a given module list
+// (scanner probes, e.g. p11), compiles a sequence, runs it
 // until every component has exited, and prints per-component code/data size,
 // exit status and the engine status flags that matter for timing.
 #pragma once
@@ -44,18 +45,29 @@ inline Component GB() { return {"GB", "MR4600", ModuleChannel::GradientB(0)}; }
 inline Component GC() { return {"GC", "MR4600", ModuleChannel::GradientC(0)}; }
 inline Component GT() { return {"GT", "MR4600", ModuleChannel::GradientT(0)}; }
 
+// A module to connect to (e.g. a line of a -m modules file).
+struct Endpoint {
+  std::string name;
+  std::uint8_t ip[4] = {127, 0, 0, 1};
+  std::uint16_t port = 0;
+};
+
 class Session {
 public:
-  Session() {
+  // The simulator modules.
+  Session() : Session({{"MR4600", {127, 0, 0, 1}, 21700},
+                       {"MR4610", {127, 0, 0, 1}, 21701},
+                       {"MR4620", {127, 0, 0, 1}, 21702}}) {}
+
+  // Any module list; the first one is the master.
+  explicit Session(const std::vector<Endpoint>& modules) {
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
     spec_ = CreateSpectrometer();
-    Connect("MR4600", 21700);
-    Connect("MR4610", 21701);
-    Connect("MR4620", 21702);
-    spec_->SetMasterModuleName("MR4600");
+    for (const auto& m : modules) Connect(m);
+    spec_->SetMasterModuleName(modules.front().name);
   }
 
   Spectrometer& spectrometer() { return *spec_; }
@@ -157,12 +169,14 @@ public:
   }
 
 private:
-  void Connect(const char* name, std::uint16_t port) {
+  void Connect(const Endpoint& e) {
     auto [r, m] = spec_->CreateModule(
-        name, IPv4Endpoint(IPv4Address(127, 0, 0, 1), port));
+        e.name, IPv4Endpoint(IPv4Address(e.ip[0], e.ip[1], e.ip[2], e.ip[3]),
+                             e.port));
     if (r != Module::Result::kSuccess) {
-      std::fprintf(stderr, "Failed to connect %s on port %u (is simulator.exe "
-                           "running?)\n", name, port);
+      std::fprintf(stderr, "Failed to connect %s at %u.%u.%u.%u:%u (is "
+                           "simulator.exe running?)\n", e.name.c_str(), e.ip[0],
+                   e.ip[1], e.ip[2], e.ip[3], e.port);
       std::exit(EXIT_FAILURE);
     }
   }

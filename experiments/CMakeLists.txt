@@ -11,3 +11,9 @@ endforeach()
 add_executable(p10_gap_stress p10_gap_stress.cpp)
 target_link_libraries(p10_gap_stress PRIVATE pp_plato)
 plato_copy_runtime(p10_gap_stress)
+
+# Probe 11 reads the UIO input on the scanner (-m modules file, read with
+# pp_plato's ReadModulesFile).
+add_executable(p11_uio_input p11_uio_input.cpp)
+target_link_libraries(p11_uio_input PRIVATE pp_plato)
+plato_copy_runtime(p11_uio_input)
