@@ -9,9 +9,9 @@
 //   UIO  for i < N: resume(T0 + i * period); v = input(mask);
 //                   sendl three words 0x8000 | 14 bits (bits 0-13, 14-27,
 //                   28-31: receivel only returns non-zero masked words)
-//        sendl(0x4000) (end); delay 1 ms; exit(0)
+//        exit(0)
 //   Rx   per sample: receive 3 words, rebuild v; meta(i), meta(v),
-//        meta(now()), complete(): one acquisition per sample
+//        meta(now()), complete(): one acquisition per sample; exits after N
 //   host prints each acquisition to stderr as it arrives.
 // No RF, no gradients. The UIO outputs (PTS bits) stay 0 during the run.
 //
@@ -40,7 +40,6 @@ namespace {
 
 constexpr double kClockHz = 100e6;
 constexpr std::int32_t kT0 = 100000;  // first sample at 1 ms
-constexpr std::int32_t kEnd = 0x4000;
 constexpr std::int32_t kData = 0x8000;
 
 class Printer : public mrs::plato::AcquisitionDataPump::Delegate {
@@ -154,19 +153,17 @@ int main(int argc, char** argv) {
               sendl(kData | (v & 0x3FFF)),
               sendl(kData | ((v >> 14) & 0x3FFF)),
               sendl(kData | ((v >> 28) & 0xF))),
-          sendl(kEnd),
-          // Scanner run 1: exit right after sendl lost the end marker (Rx
-          // never exited). Give the message time to leave before exiting.
-          delay(100000),
           ppl::exit(0)));
 
+  // Rx stops after n samples. Scanner runs 1 and 2 ended on an end-marker
+  // message (sendl(0x4000) after the loop, with or without a 1 ms delay
+  // before exit) that never reached Rx, while all 6000 data words did.
   _variable j, w, x, t;
   auto rx = _component(
       "Rx",
       _function(
-          j = 0,
-          w = receivel(0xFFFF),
-          _while(w != kEnd)(
+          _for(j = 0, j < n, ++j)(
+              w = receivel(0xFFFF),
               x = w & 0x3FFF,
               w = receivel(0xFFFF),
               x = x | ((w & 0x3FFF) << 14),
@@ -174,9 +171,7 @@ int main(int argc, char** argv) {
               x = x | ((w & 0xF) << 28),
               t = now(),
               meta(j), meta(x), meta(t),
-              complete(),
-              ++j,
-              w = receivel(0xFFFF)),
+              complete()),
           ppl::exit(0)),
       _filter::Transparent());
   _sequence seq(std::move(uio), std::move(rx));
