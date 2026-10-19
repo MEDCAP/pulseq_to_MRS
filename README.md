@@ -100,7 +100,7 @@ build/pulseq_plato -f config/sim_reference.yml other.seq -o x   # options on the
 **Frequency model.** The PTS synthesizer provides the base frequency, selected by `pts_mask` (77 = 270 MHz, per `C:\smis\smis.ini`). The NCO adds `-f`, the offset from the base, on Tx and Rx. With the scanner values that gives 270 MHz + 27.99845 MHz = 297.99845 MHz, and the run prints this sum.
 - The NCO is programmed with `-f`.
 - The Pulseq 1.5 ppm offsets scale with the physical frequency, base + `-f`.
-- Like the vendor, `pts_mask` is written to UIO bits 8–15 (`setout(mask << 8)`, `00004d00` for 77) before the sequence starts and held until it ends. The UIO component exists only when `pts_mask` ≠ 0.
+- Like the vendor, `pts_mask` is written to UIO bits 8–15 (`setout(mask << 8)`, `00004d00` for 77) before the sequence starts and held until it ends. The UIO component exists only when `pts_mask` ≠ 0 or respiratory triggering is on.
 
 | `pts_mask` | 0 | 15 | 93 | 109 | 77 | 13 |
 |---|---|---|---|---|---|---|
@@ -120,10 +120,20 @@ Keys (all optional; unknown keys, bad numbers, unknown PTS masks and bad address
 | `gradients.max_hz_per_m.{x,y,z}` | `-gx -gy -gz` | Hz/m at full-scale DAC |
 | `channels.tx_mask`, `rx_mask` | `-txmask -rxmask` | bit *i* = channel *i* (as the vendor; only 1 supported yet) |
 | `receiver.cic` | `-cic` | `on`/`off` |
+| `triggering.respiratory` | `-trigger` | `on`/`off`, default off; see [Respiratory triggering](#respiratory-triggering) |
 | `modules` (list of `{name, ip, port}`) or `modules_file` | `-m` | first module = master; `-m` replaces the list |
-| `advanced.{emit, t0_clocks, epoch_clocks, timeout_s, allow_late, stdout}` | `-emit -t0 -epoch -timeout -allow-late -stdout` | testing options |
+| `advanced.{emit, t0_clocks, epoch_clocks, timeout_s, allow_late, message_latency_clocks, stdout}` | `-emit -t0 -epoch -timeout -allow-late -stdout` | testing options (`-trigger-lead`, `-trigger-settle` have no yml key) |
 
 On the simulator a `-f config/sim_reference.yml` run and the same run with flags give identical event logs. The PTS byte appears as `UOUT 00004d00` from clock 110 to the end (the vendor sets it at 139). The YAML reader (`src/config/yaml_lite.*`) handles a strict subset: block and flow maps and lists, quoted strings and comments. It rejects tabs, anchors, tags and multi-line scalars.
+
+### Respiratory triggering
+`triggering: {respiratory: true}` (or `-trigger on`) makes the scan wait for the respiratory monitor before every repetition. The Pulseq file is not changed: the Pulseq `TRIGGERS` extension is Siemens-only and is not used.
+- **Where it waits:** at the start of every block that contains an excitation pulse (RF `use` = excitation, `'e'`). Refocusing, inversion, saturation and preparation pulses never wait. If the .seq has no excitation pulse a warning says nothing is gated. Everything before that block plays as scheduled; everything from it on plays at its normal offsets from the moment the gate arrives. The total time is therefore the nominal time plus the waits.
+- **The gate:** UIO input **bit 0 rising** (low, then high; the SA Instruments 1030 sets it high, with its own delay and pulse width). The UIO channel starts looking 50 µs after the block's nominal start, so a pulse during the previous repetition is ignored and the next pulse releases the repetition. One pulse releases only one repetition.
+- **How:** every channel (Tx, Rx, GA, GB, GC and UIO) gets a trigger row in its table at each gate. UIO waits for the edge and broadcasts a PLATO message; PLATO activates it on every channel at the same clock cycle. The other channels wait for it in `receivel`, then all restart their timers (`origin()`), so the gradients, RF and ADC keep their timing relative to each other. Gradient waveforms are not joined across a gate. The oscillators keep running, so Tx and Rx stay coherent; only the absolute carrier phase of a pulse depends on when the gate arrives.
+- **Timing after the gate:** bit 0 rising to the first event is the message latency (about 52 µs on the scanner, `advanced.message_latency_clocks`) + 2 µs + 10 µs (`-trigger-settle`, `-trigger-lead`), the same on every channel. In the simulator the RF opens 12.5 µs after the edge.
+- **Safety:** with no gate the run cannot finish. The default timeout is the sequence time + 10 s + 60 s per gate (`advanced.timeout_s` replaces it); on timeout, or on Ctrl+C, the sequence runner is stopped. Don't just kill the program: the realtime loop would keep waiting on the hardware.
+- `-n` prints `triggering: respiratory, N gate(s) …`. With triggering off the tables are identical to before.
 
 ### command to run vendor pulseq interpreter
 

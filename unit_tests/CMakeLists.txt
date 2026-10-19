@@ -19,3 +19,13 @@ target_compile_definitions(test_program PRIVATE
   PP_TEST_SEQ_DIR="${CMAKE_SOURCE_DIR}/test/seqs")
 plato_copy_runtime(test_program)
 add_test(NAME test_program COMMAND test_program)
+
+# Respiratory triggering: tables, settings and realtime programs. Writes its own
+# small .seq, so it does not need the (untracked) test/ data folder.
+add_executable(test_trigger test_trigger.cpp)
+target_link_libraries(test_trigger PRIVATE pp_plato)
+target_compile_options(test_trigger PRIVATE -Wall -Wextra)
+target_compile_definitions(test_trigger PRIVATE
+  PP_TEST_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+plato_copy_runtime(test_trigger)
+add_test(NAME test_trigger COMMAND test_trigger)

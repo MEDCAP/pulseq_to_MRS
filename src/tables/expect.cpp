@@ -35,6 +35,7 @@ bool WriteExpect(const std::string& path, const ChannelTables& t,
   const auto txBase = bases(t.tx);
   for (std::size_t i = 0; i < t.tx.size(); ++i) {
     const auto& r = t.tx[i];
+    if (r.kind() == RowKind::kTrigger) break;  // later times depend on the gate
     if (r.kind() != RowKind::kRf) continue;
     const long long b = txBase[i];
     line(0, "GATE1", b + r.w[5], "tx", i);
@@ -57,6 +58,7 @@ bool WriteExpect(const std::string& path, const ChannelTables& t,
     std::int32_t held = 0;
     for (std::size_t i = 0; i < rows.size(); ++i) {
       const auto& r = rows[i];
+      if (r.kind() == RowKind::kTrigger) break;
       if (r.kind() != RowKind::kGrad) continue;
       // The simulator logs gradient values through its own (non-linear)
       // mapping (FINDINGS G3), so which point first shows as a change can't
@@ -82,6 +84,7 @@ bool WriteExpect(const std::string& path, const ChannelTables& t,
   const auto rxBase = bases(t.rx);
   for (std::size_t i = 0; i < t.rx.size(); ++i) {
     const auto& r = t.rx[i];
+    if (r.kind() == RowKind::kTrigger) break;
     if (r.kind() != RowKind::kAdc) continue;
     const long long b = rxBase[i];
     // acquire2 resets the CIC grid when it executes, which should be `at`

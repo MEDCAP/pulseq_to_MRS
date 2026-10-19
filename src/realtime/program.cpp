@@ -21,6 +21,9 @@ std::int32_t I32(std::uint32_t v) { return static_cast<std::int32_t>(v); }
 
 constexpr std::int32_t Kind(RowKind k) { return static_cast<std::int32_t>(k); }
 
+// The respiratory monitor (SA Instruments 1030) sets UIO input bit 0 high.
+constexpr std::int32_t kGateMask = 1;
+
 // Rows of an unrolled program each cost tens of bytes of the 8 KiB instruction
 // memory (FINDINGS T6); refuse early instead of failing in the compiler.
 constexpr std::size_t kMaxUnrolledRows = 64;
@@ -34,6 +37,8 @@ int WordsUsed(RowKind k) {
     case RowKind::kAdc: return 6;   // n, dwell, freq, phase, restoreAt, grid
     case RowKind::kEnd: return 0;
     case RowKind::kOrigin: return 2;// w2 grid (0=none), w3 setgrid time
+    case RowKind::kTrigger: return 4;  // w2 origin delay, w3 grid (0=none),
+                                       // w4 setgrid time, w5 UIO arming delay
   }
   return 0;
 }
@@ -52,6 +57,7 @@ struct ChannelData {
 struct RowVars {
   _variable at;
   _variable w[8];  // w[2]..w[7] used
+  _variable gate;  // UIO: the input value while waiting for a gate
 };
 
 // ---- per-row calls, shared by both emitters ----------------------------------
@@ -101,6 +107,27 @@ std::vector<StatementBuilder> RowCalls(RowKind kind, RowVars& v,
       if (d.rows == &t.rx)  // if adc
         s.push_back(_if(v.w[2] != 0)(setgrid(v.w[2], v.w[3]))); // setgrid(period, at)
       break;
+    case RowKind::kTrigger:
+      // Respiratory gate. UIO arms a little after the halt time (every other
+      // channel is blocked in receivel by then), waits for input bit 0 to fall
+      // and then rise (a rising edge, so one monitor pulse releases only one
+      // repetition) and broadcasts the release. The others wake on the message,
+      // which PLATO activates at the same clock on every channel. Everyone then
+      // restarts its timer a short delay later; later rows count from there.
+      if (d.rows == &t.uio) {
+        s.push_back(resume(v.at + v.w[5]));
+        s.push_back(v.gate = input(kGateMask));
+        s.push_back(_while(v.gate != 0)(v.gate = input(kGateMask)));
+        s.push_back(_while(v.gate == 0)(v.gate = input(kGateMask)));
+        s.push_back(sendl(1));
+      } else {
+        s.push_back(receivel(0xFFFFFFFF));
+      }
+      s.push_back(origin(now() + v.w[2]));
+      // Rx: origin() stops the CIC grid; set it up again for the next ADC.
+      if (d.rows == &t.rx)
+        s.push_back(_if(v.w[3] != 0)(setgrid(v.w[3], v.w[4])));
+      break;
     case RowKind::kEnd:
       // Every channel exits at the end of the sequence.
       s.push_back(resume(v.at));
@@ -129,8 +156,10 @@ std::vector<StatementBuilder> Init(Role role, const tables::ChannelTables& t,
       break;
     case Role::kUio:
       // PTS synthesizer output bits; the channel holds them until it exits.
-      s.push_back(setout(static_cast<std::int32_t>(o.uioOutWord),
-                         static_cast<std::int32_t>(o.uioAt)));
+      // (The UIO also exists for respiratory gates without a PTS mask.)
+      if (o.uioOutWord != 0)
+        s.push_back(setout(static_cast<std::int32_t>(o.uioOutWord),
+                           static_cast<std::int32_t>(o.uioAt)));
       break;
     default:
       s.push_back(setscale(32767));
@@ -198,7 +227,7 @@ std::vector<StatementBuilder> BlockLoop(Role role,
   // exits). Reads happen inside the case: the stream pointer walks the row in
   // order, and rf()/gradient() moving it (FINDINGS S5) is undone by the next
   // row's seek.
-  bool present[5] = {};
+  bool present[6] = {};
   for (const Row& r : *d.rows) present[static_cast<int>(r.kind())] = true;
   auto makeCase = [&](RowKind k) {
     std::vector<StatementBuilder> c;
@@ -217,12 +246,19 @@ std::vector<StatementBuilder> BlockLoop(Role role,
     }
   // _switch is an if-chain (plato docs 6.1.17): most frequent kind first.
   const bool hasOrigin = present[static_cast<int>(RowKind::kOrigin)];
+  const bool hasTrigger = present[static_cast<int>(RowKind::kTrigger)];
   StatementBuilder dispatch = [&]() -> StatementBuilder {
     const auto end = [&] { return makeCase(RowKind::kEnd); };
     const auto org = [&] { return makeCase(RowKind::kOrigin); };
+    const auto trg = [&] { return makeCase(RowKind::kTrigger); };
+    if (play && hasOrigin && hasTrigger)
+      return _switch(kind)(makeCase(*play), org(), trg(), end());
     if (play && hasOrigin) return _switch(kind)(makeCase(*play), org(), end());
+    if (play && hasTrigger) return _switch(kind)(makeCase(*play), trg(), end());
     if (play) return _switch(kind)(makeCase(*play), end());
+    if (hasOrigin && hasTrigger) return _switch(kind)(org(), trg(), end());
     if (hasOrigin) return _switch(kind)(org(), end());
+    if (hasTrigger) return _switch(kind)(trg(), end());
     return _switch(kind)(end());
   }();
 
@@ -278,7 +314,8 @@ Program BuildProgram(const tables::ChannelTables& t, const ProgramOptions& o) {
                   {Role::kGradC, &t.grad[2]}, {Role::kUio, &t.uio}};
 
   for (const auto& ch : channels) {
-    if (ch.role == Role::kUio && o.uioOutWord == 0) continue;
+    // UIO: PTS output bits and/or the respiratory gates.
+    if (ch.role == Role::kUio && o.uioOutWord == 0 && t.triggers == 0) continue;
     if (ch.rows->empty() || ch.rows->back().kind() != RowKind::kEnd)
       throw std::runtime_error(std::string(RoleName(ch.role)) +
                                ": table does not end with an END row");

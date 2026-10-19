@@ -132,7 +132,7 @@ ScanSettings LoadScanSettings(const std::string& path) {
   if (root.IsNull()) return s;  // empty file
   r.ExpectMap(root, "the settings file",
               {"sequence", "output", "rf", "gradients", "channels", "receiver",
-               "modules", "modules_file", "advanced"});
+               "triggering", "modules", "modules_file", "advanced"});
 
   if (const Node* n = root.Find("sequence")) s.sequence = r.Path(*n, "sequence");
   if (const Node* n = root.Find("output")) s.output = r.Text(*n, "output");
@@ -175,6 +175,12 @@ ScanSettings LoadScanSettings(const std::string& path) {
     if (const Node* n = rx->Find("cic")) s.cic = r.Bool(*n, "receiver.cic");
   }
 
+  if (const Node* tr = root.Find("triggering"); tr && !tr->IsNull()) {
+    r.ExpectMap(*tr, "triggering", {"respiratory"});
+    if (const Node* n = tr->Find("respiratory"))
+      s.respiratory = r.Bool(*n, "triggering.respiratory");
+  }
+
   const Node* mods = root.Find("modules");
   const Node* modsFile = root.Find("modules_file");
   if (mods && modsFile)
@@ -210,7 +216,7 @@ ScanSettings LoadScanSettings(const std::string& path) {
   if (const Node* a = root.Find("advanced"); a && !a->IsNull()) {
     r.ExpectMap(*a, "advanced",
                 {"emit", "t0_clocks", "epoch_clocks", "timeout_s", "allow_late",
-                 "stdout"});
+                 "message_latency_clocks", "stdout"});
     if (const Node* n = a->Find("emit")) {
       s.emit = r.Text(*n, "advanced.emit");
       if (*s.emit != "loop" && *s.emit != "unrolled")
@@ -220,6 +226,11 @@ ScanSettings LoadScanSettings(const std::string& path) {
     if (const Node* n = a->Find("epoch_clocks")) s.epochClocks = r.Integer(*n, "advanced.epoch_clocks");
     if (const Node* n = a->Find("timeout_s")) s.timeoutSeconds = r.Positive(*n, "advanced.timeout_s");
     if (const Node* n = a->Find("allow_late")) s.allowLate = r.Bool(*n, "advanced.allow_late");
+    if (const Node* n = a->Find("message_latency_clocks")) {
+      s.messageLatencyClocks = r.Integer(*n, "advanced.message_latency_clocks");
+      if (*s.messageLatencyClocks < 0)
+        r.Fail(*n, "advanced.message_latency_clocks must be >= 0");
+    }
     if (const Node* n = a->Find("stdout")) s.toStdout = r.Bool(*n, "advanced.stdout");
   }
   return s;

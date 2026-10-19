@@ -37,6 +37,8 @@ void Usage(const char* argv0) {
       "  -rxmask  receiver-mask, bit i = receiver i (only 1 is supported yet)\n"
       "  -txmask  transmitter-mask, bit i = transmitter i (only 1 supported yet)\n"
       "  -cic     on/off\n"
+      "  -trigger on/off   respiratory triggering: before every excitation\n"
+      "           pulse (RF use 'e') wait for UIO input bit 0 to rise\n"
       "  -gx      max-gradient-amp-hz/m\n"
       "  -gy      max-gradient-amp-hz/m\n"
       "  -gz      max-gradient-amp-hz/m\n"
@@ -44,7 +46,9 @@ void Usage(const char* argv0) {
       "  -emit    loop|unrolled   realtime program form (default loop)\n"
       "  -t0      clocks          RT clock of sequence t = 0 (default 10000)\n"
       "  -epoch   clocks          rebase with origin() this often (default 2^30)\n"
-      "  -timeout seconds         wait limit (default duration + 10 s)\n"
+      "  -trigger-lead clocks     halt point into the new epoch after a gate (1000)\n"
+      "  -trigger-settle clocks   origin() this far after the release (200)\n"
+      "  -timeout seconds         wait limit (default duration + 10 s + 60 s/gate)\n"
       "  -expect  file            write the expected simulator log times\n"
       "  -n                       build everything, do not connect or run\n"
       "  -allow-late              run even if rows are too close for the loop\n",
@@ -81,6 +85,8 @@ int main(int argc, char** argv) {
       if (s.txMask) txMask = *s.txMask;
       if (s.rxMask) rxMask = *s.rxMask;
       if (s.cic) cfg.cicCompensation = po.cicCompensation = *s.cic;
+      if (s.respiratory) cfg.respiratoryTrigger = *s.respiratory;
+      if (s.messageLatencyClocks) cfg.triggerMsgLatencyClk = *s.messageLatencyClocks;
       if (s.modulesFile) modulesFile = *s.modulesFile;
       for (const auto& m : s.modules) {
         pp::plato::ModuleAddress a;
@@ -142,6 +148,14 @@ int main(int argc, char** argv) {
       }
       cfg.cicCompensation = po.cicCompensation = !std::strcmp(v, "on");
     }
+    else if (!std::strcmp(a, "-trigger")) {
+      const char* v = next();
+      if (std::strcmp(v, "on") && std::strcmp(v, "off")) {
+        std::fprintf(stderr, "-trigger expects on or off\n");
+        return 2;
+      }
+      cfg.respiratoryTrigger = !std::strcmp(v, "on");
+    }
     else if (!std::strcmp(a, "-gx")) cfg.gradMaxHzPerM[0] = std::atof(next());
     else if (!std::strcmp(a, "-gy")) cfg.gradMaxHzPerM[1] = std::atof(next());
     else if (!std::strcmp(a, "-gz")) cfg.gradMaxHzPerM[2] = std::atof(next());
@@ -156,6 +170,8 @@ int main(int argc, char** argv) {
     }
     else if (!std::strcmp(a, "-t0")) cfg.startOffset = std::atoll(next());
     else if (!std::strcmp(a, "-epoch")) cfg.epochLimitClk = std::atoll(next());
+    else if (!std::strcmp(a, "-trigger-lead")) cfg.triggerLeadClk = std::atoll(next());
+    else if (!std::strcmp(a, "-trigger-settle")) cfg.triggerSettleClk = std::atoll(next());
     else if (!std::strcmp(a, "-timeout")) ro.timeoutSeconds = std::atof(next());
     else if (!std::strcmp(a, "-expect")) expectFile = next();
     else if (!std::strcmp(a, "-n")) dryRun = true;
@@ -232,6 +248,11 @@ int main(int argc, char** argv) {
                    t.timingIssues.size());
       return 3;
     }
+    if (cfg.respiratoryTrigger)
+      std::fprintf(log, "triggering: respiratory, %d gate(s) before excitation "
+                        "blocks (UIO input bit 0 rising edge)\n",
+                   t.triggers);
+    ro.gates = t.triggers;
     const auto program = pp::realtime::BuildProgram(t, po);
     std::fprintf(log, "program: %s, rf library %zu points, gradient library "
                       "%zu points, %d origin() rows\n",

@@ -21,6 +21,7 @@ struct TimedRow {
   unsigned timeMask = 0;               // bit k: word k is a time
   Clk first = 0;  // earliest timed action of the row (incl. leads)
   Clk last = 0;   // latest timed action of the row
+  Clk haltAt = 0; // kTrigger: absolute nominal halt time (excitation block start)
   int block = -1;
 
   void SetTime(int k, Clk t) {
@@ -42,7 +43,44 @@ std::vector<Row> Rebase(const char* channel, std::vector<TimedRow>& rows,
   out.reserve(rows.size());
   Clk base = 0;
   Clk prevLast = -1;
-  for (auto& r : rows) {
+  for (std::size_t ri = 0; ri < rows.size(); ++ri) {
+    auto& r = rows[ri];
+    if (r.row.w[0] == static_cast<std::uint32_t>(RowKind::kTrigger)) {
+      // A gate is an epoch boundary: the channel restarts its timer when it is
+      // released, and the halt time maps to triggerLeadClk into the new epoch.
+      const Clk rel = r.haltAt - base;
+      if (rel < 0 || rel > kMax) {
+        std::ostringstream os;
+        os << channel << " block " << r.block + 1 << ": gate at clock "
+           << r.haltAt << " is outside the current epoch (base " << base << ")";
+        throw TableError(os.str());
+      }
+      r.row.w[1] = static_cast<std::uint32_t>(rel);
+      const Clk newBase = r.haltAt - cfg.triggerLeadClk;
+      // Rx: origin() stops the CIC grid, so the next ADC needs its grid set
+      // up again (w3/w4, like the ORIGIN row), unless it is so far away that
+      // an epoch-limit ORIGIN does it.
+      if (ri + 1 < rows.size() &&
+          rows[ri + 1].row.w[0] == static_cast<std::uint32_t>(RowKind::kAdc) &&
+          rows[ri + 1].last - newBase <= cfg.epochLimitClk) {
+        const auto& a = rows[ri + 1];
+        const Clk grid = static_cast<Clk>(a.row.w[7]);
+        const Clk tg = a.abs[1] - 7 * grid - newBase;
+        if (tg < cfg.triggerSettleClk + 200) {
+          std::ostringstream os;
+          os << channel << " block " << a.block + 1
+             << ": the first ADC after the gate is too close to it (no room "
+                "to set up the CIC grid 7 ticks before it)";
+          throw TableError(os.str());
+        }
+        r.row.w[3] = static_cast<std::uint32_t>(grid);
+        r.row.w[4] = static_cast<std::uint32_t>(tg);
+      }
+      out.push_back(r.row);
+      base = newBase;
+      prevLast = newBase + cfg.triggerSettleClk;
+      continue;
+    }
     const bool adc = r.row.w[0] == static_cast<std::uint32_t>(RowKind::kAdc);
     // r.row.w[7] is its grid word
     const Clk grid = adc ? static_cast<Clk>(r.row.w[7]) : 0;
@@ -201,7 +239,8 @@ void BuildTx(const model::SequenceModel& m, const ScanConfig& cfg,
 }
 
 void BuildGrad(const model::SequenceModel& m, const ScanConfig& cfg,
-               ChannelTables& t, std::array<std::vector<TimedRow>, 3>& out) {
+               ChannelTables& t, std::array<std::vector<TimedRow>, 3>& out,
+               const std::vector<int>& haltBlocks) {
   static const char* kNames[3] = {"GA(x)", "GB(y)", "GC(z)"};
   for (int axis = 0; axis < 3; ++axis) {
     struct Pending {
@@ -229,7 +268,14 @@ void BuildGrad(const model::SequenceModel& m, const ScanConfig& cfg,
     for (std::size_t i = 0; i < list.size(); ++i) {
       auto& p = list[i];
       const Clk last = p.at + p.raster * static_cast<Clk>(p.v.size() - 1);
-      const bool joined = i + 1 < list.size() && list[i + 1].at == last;
+      // Never join across a gate: the joint point is played by the later
+      // waveform, so the earlier one would end on its last non-zero sample and
+      // the gradient would hold it for as long as the channel waits.
+      bool gated = false;
+      if (i + 1 < list.size())
+        for (int hb : haltBlocks)
+          gated |= p.block < hb && hb <= list[i + 1].block;
+      const bool joined = i + 1 < list.size() && list[i + 1].at == last && !gated;
       if (joined) {
         if (std::abs(p.v.back() - list[i + 1].v.front()) > 1e-6) {
           std::ostringstream os;
@@ -318,15 +364,50 @@ void BuildRx(const model::SequenceModel& m, const ScanConfig& cfg,
   }
 }
 
+// Puts one kTrigger row per halt block into a channel's rows, ahead of the
+// first row of that block (rows are in block order; the END row belongs to the
+// last block, so a gate in the last block still precedes it).
+void InsertTriggers(std::vector<TimedRow>& rows, const model::SequenceModel& m,
+                    const ScanConfig& cfg, const std::vector<int>& haltBlocks,
+                    Clk originDelay, Clk arm) {
+  std::size_t pos = 0;
+  for (int b : haltBlocks) {
+    while (pos < rows.size() && rows[pos].block < b) ++pos;
+    const Clk at = cfg.startOffset + m.blocks[b].start;
+    TimedRow tr;
+    tr.row.w = {static_cast<std::uint32_t>(RowKind::kTrigger), 0,
+                static_cast<std::uint32_t>(originDelay), 0, 0,
+                static_cast<std::uint32_t>(arm), 0, 0};
+    tr.SetTime(1, at);
+    tr.haltAt = at;
+    tr.first = tr.last = at;
+    tr.block = b;
+    rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(pos), tr);
+    ++pos;
+  }
+}
+
 }  // namespace
 
 ChannelTables BuildTables(const model::SequenceModel& m, const ScanConfig& cfg) {
   ChannelTables t;
   t.baseFreqWord = units::FrequencyWord(cfg.larmorHz, cfg.clocks);
+  // Gates: the start of every block with an excitation pulse (Pulseq RF use
+  // 'e'); no change to the Pulseq format is needed.
+  std::vector<int> haltBlocks;
+  if (cfg.respiratoryTrigger) {
+    for (const auto& b : m.blocks)
+      if (b.rf >= 0 && m.rf[b.rf].use == 'e') haltBlocks.push_back(b.index);
+    if (haltBlocks.empty())
+      t.warnings.push_back(
+          "respiratory triggering is on but the sequence has no excitation "
+          "pulse (RF use 'e'): nothing is gated");
+  }
+  t.triggers = static_cast<int>(haltBlocks.size());
   std::vector<TimedRow> tx, rx;
   std::array<std::vector<TimedRow>, 3> grad;
   BuildTx(m, cfg, t, tx);
-  BuildGrad(m, cfg, t, grad);
+  BuildGrad(m, cfg, t, grad, haltBlocks);
   BuildRx(m, cfg, t, rx);
 
   t.end = cfg.startOffset + m.duration;
@@ -339,6 +420,16 @@ ChannelTables BuildTables(const model::SequenceModel& m, const ScanConfig& cfg) 
   rx.push_back(end);
   for (auto& g : grad) g.push_back(end);
   std::vector<TimedRow> uio{end};
+
+  // Every channel gets every gate, in the same order. UIO also waits for the
+  // message to reach the others before it restarts its own timer.
+  if (!haltBlocks.empty()) {
+    for (auto* rows : {&tx, &rx, &grad[0], &grad[1], &grad[2]})
+      InsertTriggers(*rows, m, cfg, haltBlocks, cfg.triggerSettleClk, 0);
+    InsertTriggers(uio, m, cfg, haltBlocks,
+                   cfg.triggerSettleClk + cfg.triggerMsgLatencyClk,
+                   cfg.triggerArmClk);
+  }
 
   t.tx = Rebase("Tx", tx, cfg.txSlackClk, cfg, t.origins);
   t.rx = Rebase("Rx", rx, cfg.rxSlackClk, cfg, t.origins);
@@ -365,6 +456,9 @@ std::vector<long long> EpochBases(const std::vector<Row>& rows,
     b[i] = base;
     if (rows[i].kind() == RowKind::kOrigin)
       base += rows[i].at() + cfg.originLatencyClk;
+    else if (rows[i].kind() == RowKind::kTrigger)
+      base += rows[i].at() - cfg.triggerLeadClk;  // nominal; the real start
+                                                  // depends on the gate
   }
   return b;
 }

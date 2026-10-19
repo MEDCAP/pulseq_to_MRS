@@ -28,6 +28,12 @@ channels:
 receiver:
   cic: off
 
+triggering:
+  # true: before every excitation pulse (Pulseq RF use 'e') wait for UIO input
+  # bit 0 to rise, as the SA Instruments 1030 respiratory monitor sets it (the
+  # monitor applies its own delay and pulse width). The .seq file is unchanged.
+  respiratory: false
+
 modules:
   - {name: MR4600, ip: 10.0.0.100, port: 4700}
   - {name: MR4610, ip: 10.0.0.101, port: 4700}

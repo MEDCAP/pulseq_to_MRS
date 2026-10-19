@@ -33,8 +33,9 @@ struct RunOptions {
   bool dataToStdout = false;  // -stdout: complex64 samples to stdout instead
   std::uint64_t expectedSamples = 0;  // total ADC samples, to know when the
                                       // pump has everything
-  double timeoutSeconds = 0;  // 0 = sequence duration + 10 s
+  double timeoutSeconds = 0;  // 0 = sequence duration + 10 s + 60 s per gate
   double sequenceSeconds = 0;
+  int gates = 0;              // respiratory gates: the run waits for each
   std::FILE* log = stdout;    // diagnostics (stderr with -stdout)
 };
 

@@ -55,6 +55,11 @@ void PrintRows(const char* name, const std::vector<pp::tables::Row>& rows,
       case RowKind::kEnd:
         std::printf("  %4zu END  at=%u\n", i, r.at());
         break;
+      case RowKind::kTrigger:
+        std::printf("  %4zu TRIGGER halt=%u originDelay=%u grid=%u setgrid=%u "
+                    "arm=%u (later rows count from the release)\n",
+                    i, r.at(), r.w[2], r.w[3], r.w[4], r.w[5]);
+        break;
       case RowKind::kOrigin:
         std::printf("  %4zu ORIGIN at=%u (later rows count from here + 10)\n",
                     i, r.at());
@@ -92,6 +97,7 @@ int main(int argc, char** argv) {
     else if (!std::strcmp(argv[i], "-gy")) cfg.gradMaxHzPerM[1] = std::atof(next());
     else if (!std::strcmp(argv[i], "-gz")) cfg.gradMaxHzPerM[2] = std::atof(next());
     else if (!std::strcmp(argv[i], "-cic")) cfg.cicCompensation = !std::strcmp(next(), "on");
+    else if (!std::strcmp(argv[i], "-trigger")) cfg.respiratoryTrigger = !std::strcmp(next(), "on");
     else if (!std::strcmp(argv[i], "-rows")) rowLimit = std::strtoul(next(), nullptr, 10);
     else if (!std::strcmp(argv[i], "-wave")) gWavePoints = std::strtoul(next(), nullptr, 10);
     else if (!std::strcmp(argv[i], "-export")) exportPath = next();
@@ -139,6 +145,7 @@ int main(int argc, char** argv) {
     PrintRows("GB", t.grad[1], rowLimit);
     PrintRows("GC", t.grad[2], rowLimit);
     PrintRows("Rx", t.rx, rowLimit);
+    if (t.triggers) PrintRows("UIO", t.uio, rowLimit);
     for (const auto& w : t.warnings) std::printf("warning: %s\n", w.c_str());
     for (const auto& w : t.timingIssues) std::printf("timing: %s\n", w.c_str());
     if (exportPath) {

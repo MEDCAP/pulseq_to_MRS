@@ -5,8 +5,10 @@
 #include <sequence_component_mapping.hpp>
 #include <spectrometer.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -23,6 +25,28 @@
 namespace pp::plato {
 
 namespace mp = mrs::plato;
+
+namespace {
+
+// Ctrl+C asks Run() to stop the sequence runner: killing only this program
+// would leave the realtime programs (e.g. a wait for a gate) running on the
+// hardware.
+std::atomic<bool> gInterrupted{false};
+extern "C" void OnInterrupt(int) { gInterrupted = true; }
+
+struct InterruptGuard {
+  InterruptGuard() {
+    gInterrupted = false;
+    prev_ = std::signal(SIGINT, OnInterrupt);
+  }
+  ~InterruptGuard() { std::signal(SIGINT, prev_); }
+  void (*prev_)(int);
+};
+
+// Default wait per respiratory gate before the run is given up.
+constexpr double kGateTimeoutSeconds = 60;
+
+}  // namespace
 
 std::vector<ModuleAddress> ReadModulesFile(const std::string& path) {
   std::ifstream in(path);
@@ -146,6 +170,7 @@ struct Placement {
 
 int Run(const realtime::Program& program, const RunOptions& o) {
   std::FILE* log = o.log;
+  InterruptGuard interruptGuard;
 #ifdef _WIN32
   WSADATA wsaData;
   WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -278,11 +303,20 @@ int Run(const realtime::Program& program, const RunOptions& o) {
   // Wait for every component to exit. kCommunicationFailure: the simulator
   // reached --until and closed its sockets (FINDINGS T5): nothing more runs.
   const double timeout =
-      o.timeoutSeconds > 0 ? o.timeoutSeconds : o.sequenceSeconds + 10;
+      o.timeoutSeconds > 0
+          ? o.timeoutSeconds
+          : o.sequenceSeconds + 10 + o.gates * kGateTimeoutSeconds;
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::duration<double>(timeout);
-  bool allDone = rc != 0, gone = false;
+  bool allDone = rc != 0, gone = false, interrupted = false;
   while (!allDone && std::chrono::steady_clock::now() < deadline) {
+    if (gInterrupted) {
+      std::fprintf(log, "Ctrl+C: stopping the sequence runner\n");
+      (void)runner->Stop();
+      interrupted = true;
+      rc = 1;
+      break;
+    }
     allDone = true;
     for (const auto& c : program.components) {
       bool running = true;
@@ -298,9 +332,12 @@ int Run(const realtime::Program& program, const RunOptions& o) {
     }
     if (!allDone) std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
-  if (!allDone) {
-    std::fprintf(log, "error: timeout after %.1f s waiting for the sequence\n",
-                 timeout);
+  if (!allDone && !interrupted) {
+    std::fprintf(log, "error: timeout after %.1f s waiting for the sequence%s\n",
+                 timeout,
+                 o.gates ? " (respiratory triggering: did UIO input bit 0 "
+                           "rise at every gate?)"
+                         : "");
     (void)runner->Stop();
     rc = 1;
   }

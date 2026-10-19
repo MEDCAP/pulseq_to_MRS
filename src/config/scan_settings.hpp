@@ -18,6 +18,11 @@
 //     rx_mask: 1                           # bit i = receiver i
 //   receiver:
 //     cic: off                             # -cic on|off
+//   triggering:
+//     respiratory: false                   # -trigger on|off: before every
+//                                          #   excitation pulse (RF use 'e')
+//                                          #   wait for UIO input bit 0 to rise
+//                                          #   (respiratory monitor)
 //   modules:                               # or  modules_file: sim_modules.txt
 //     - {name: MR4600, ip: 127.0.0.1, port: 21700}   # first = master
 //     - {name: MR4610, ip: 127.0.0.1, port: 21701}
@@ -28,6 +33,8 @@
 //     epoch_clocks: 1073741824
 //     timeout_s: 30
 //     allow_late: false
+//     message_latency_clocks: 5300         # respiratory triggering: PLATO
+//                                          #   message delay (scanner 5300)
 //     stdout: false
 //
 // Every key is optional; unknown keys are errors (typos must not pass
@@ -65,11 +72,12 @@ struct ScanSettings {
   std::array<std::optional<double>, 3> gradMaxHzPerM;
   std::optional<unsigned long> txMask, rxMask;
   std::optional<bool> cic;
+  std::optional<bool> respiratory;  // triggering.respiratory
   std::optional<std::string> modulesFile;
   std::vector<ModuleEntry> modules;  // empty = not given
   // advanced
   std::optional<std::string> emit;
-  std::optional<long long> t0Clocks, epochClocks;
+  std::optional<long long> t0Clocks, epochClocks, messageLatencyClocks;
   std::optional<double> timeoutSeconds;
   std::optional<bool> allowLate;
   std::optional<bool> toStdout;

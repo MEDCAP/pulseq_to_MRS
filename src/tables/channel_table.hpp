@@ -22,6 +22,17 @@
 //   kEnd     (at = end of sequence)
 //   kOrigin  origin(at): the channel timer restarts at at + originLatencyClk,
 //            and later rows count from there
+//   kTrigger respiratory gate (ScanConfig::respiratoryTrigger), one per
+//            excitation block on EVERY channel incl. UIO, same order.
+//            w1 nominal halt time (start of the excitation block), w2 delay
+//            from the release to the new epoch (origin(now() + w2); UIO adds
+//            the message latency so its epoch starts with the others'),
+//            w3/w4 Rx CIC grid and setgrid time if the next row is an ADC
+//            (as in kOrigin, 0 = none), w5 UIO arming delay after w1.
+//            UIO: waits for UIO input bit 0 to rise, then sendl(1); every
+//            other channel: receivel, then origin. The new epoch starts at
+//            the release, so later rows count from there: the halt time
+//            maps to triggerLeadClk into the new epoch.
 // Time words are clocks since the channel's last origin() (or its start); the
 // host keeps them below 2^31 (signed realtime literals and variables).
 // pointsMinus1 because rf()/gradient() with an address play N + 1 points
@@ -40,7 +51,7 @@
 namespace pp::tables {
 
 enum class RowKind : std::uint32_t {
-  kEnd = 0, kRf = 1, kGrad = 2, kAdc = 3, kOrigin = 4
+  kEnd = 0, kRf = 1, kGrad = 2, kAdc = 3, kOrigin = 4, kTrigger = 5
 };
 // Absolute clock of a time word: base + value, where base starts at 0 and
 // every kOrigin row adds its at + ScanConfig::originLatencyClk.
@@ -93,6 +104,24 @@ struct ScanConfig {
   // the signed 32-bit range). origin(at) takes effect at at + latency (p09).
   model::Clk epochLimitClk = model::Clk{1} << 30;
   model::Clk originLatencyClk = 10;
+  // Respiratory triggering: before every excitation block (RF use 'e') all
+  // channels wait for UIO input bit 0 to rise (the monitor sets the delay and
+  // the width itself). The Pulseq format is not involved.
+  bool respiratoryTrigger = false;
+  // The block start of the excitation block plays this long after the new
+  // epoch starts, so the first event keeps every channel's row slack (the Tx
+  // row starts up to 90 clocks before the block start).
+  model::Clk triggerLeadClk = 1000;
+  // origin(now() + settle) after the release, so it is still in the future.
+  model::Clk triggerSettleClk = 200;
+  // UIO starts looking for the gate this long after the halt time, so that
+  // every channel is already blocked in receivel (an early message may be
+  // dropped, p12) and a gate during the previous repetition is ignored.
+  model::Clk triggerArmClk = 5000;
+  // PLATO delivers a message to the other channels this long after it is sent
+  // (p11: 52.41 us on the scanner, 0.11 us on the simulator). UIO delays its
+  // origin by it so that its epoch starts with the others'.
+  model::Clk triggerMsgLatencyClk = 5300;
   units::Clocks clocks;
 };
 
@@ -100,15 +129,16 @@ struct ChannelTables {
   std::vector<Row> tx;
   std::vector<Row> rx;
   std::array<std::vector<Row>, 3> grad;  // logical x, y, z -> GA, GB, GC
-  // Uncommitted I/O: only END (and ORIGIN) rows. It holds the PTS output
-  // bits (set at init) until the end of the sequence; outputs return to 0
-  // when a channel exits.
+  // Uncommitted I/O: END (and ORIGIN) rows, plus the kTrigger rows. It holds
+  // the PTS output bits (set at init) until the end of the sequence; outputs
+  // return to 0 when a channel exits.
   std::vector<Row> uio;
   shapes::RfLibrary rfLib;
   shapes::GradLibrary gradLib;
   std::uint32_t baseFreqWord = 0;   // setfreq(larmor) on Tx and Rx at start
   model::Clk end = 0;               // absolute clock of the last event
   int origins = 0;                  // ORIGIN rows over all channels
+  int triggers = 0;                 // gates (kTrigger rows per channel)
   std::vector<std::string> warnings;
   std::vector<std::string> timingIssues;
 };
