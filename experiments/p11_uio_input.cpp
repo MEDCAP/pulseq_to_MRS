@@ -9,7 +9,7 @@
 //   UIO  for i < N: resume(T0 + i * period); v = input(mask);
 //                   sendl three words 0x8000 | 14 bits (bits 0-13, 14-27,
 //                   28-31: receivel only returns non-zero masked words)
-//        sendl(0x4000) (end); exit(0)
+//        sendl(0x4000) (end); delay 1 ms; exit(0)
 //   Rx   per sample: receive 3 words, rebuild v; meta(i), meta(v),
 //        meta(now()), complete(): one acquisition per sample
 //   host prints each acquisition to stderr as it arrives.
@@ -155,6 +155,9 @@ int main(int argc, char** argv) {
               sendl(kData | ((v >> 14) & 0x3FFF)),
               sendl(kData | ((v >> 28) & 0xF))),
           sendl(kEnd),
+          // Scanner run 1: exit right after sendl lost the end marker (Rx
+          // never exited). Give the message time to leave before exiting.
+          delay(100000),
           ppl::exit(0)));
 
   _variable j, w, x, t;
