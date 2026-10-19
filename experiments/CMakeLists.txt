@@ -17,3 +17,8 @@ plato_copy_runtime(p10_gap_stress)
 add_executable(p11_uio_input p11_uio_input.cpp)
 target_link_libraries(p11_uio_input PRIVATE pp_plato)
 plato_copy_runtime(p11_uio_input)
+
+# Probe 12: inter-channel message behaviour (buffering, simultaneity, loss).
+add_executable(p12_message_probe p12_message_probe.cpp)
+target_link_libraries(p12_message_probe PRIVATE pp_plato)
+plato_copy_runtime(p12_message_probe)
