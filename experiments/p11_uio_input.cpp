@@ -29,6 +29,10 @@
 //   -s       duration, default 20
 //   -period  sample period in ms, default 10 (100 Hz), at least 2
 //   -mask    input mask, default 0xFFFFFFFF
+//   -olat    origin() latency in clocks, default 11 (scanner; simulator 10)
+//   -norefresh  no origin() per sample: one timeline, -s < 21 (as run 2)
+//   -raw     also print every pump callback (acquisition id, fragment
+//            offset, size, last flag, words) to stderr
 #include "probe_common.hpp"
 
 #include "plato/session.hpp"
@@ -46,13 +50,14 @@ namespace {
 constexpr double kClockHz = 100e6;
 constexpr std::int32_t kT0 = 100000;  // sample at 1 ms into each epoch
 constexpr std::int32_t kData = 0x8000;
-// origin(at) takes effect at at + 10 clocks (FINDINGS T10,
-// ScanConfig::originLatencyClk).
-constexpr std::int32_t kOriginLatency = 10;
+// origin(at) takes effect at at + latency: 10 clocks on the simulator
+// (FINDINGS T10), 11 on the scanner (run 3: the Rx latency grew by exactly 1
+// clock per sample with 10). -olat overrides.
+constexpr std::int32_t kOriginLatencyScanner = 11;
 
 class Printer : public mrs::plato::AcquisitionDataPump::Delegate {
 public:
-  Printer(std::int32_t periodClk) : periodClk_(periodClk) {}
+  Printer(std::int32_t periodClk, bool raw) : periodClk_(periodClk), raw_(raw) {}
 
   void AcquisitionDataPump_Submit(mrs::plato::AcquisitionDataPump*, unsigned,
                                   std::uint32_t acqId,
@@ -60,6 +65,14 @@ public:
                                   const void* payload,
                                   std::size_t size) override {
     std::lock_guard<std::mutex> lock(m_);
+    if (raw_) {  // every pump callback as delivered, words big-endian
+      std::fprintf(stderr, "raw acq=%u off=%u size=%zu last=%d:", acqId,
+                   fragmentOffset, size, last);
+      const auto* p = static_cast<const std::uint8_t*>(payload);
+      for (std::size_t k = 0; k < size; ++k)
+        std::fprintf(stderr, "%s%02X", k % 4 ? "" : " ", p[k]);
+      std::fprintf(stderr, "\n");
+    }
     auto& b = pending_[acqId];
     if (b.size() < fragmentOffset + size) b.resize(fragmentOffset + size);
     std::memcpy(b.data() + fragmentOffset, payload, size);
@@ -103,6 +116,7 @@ public:
 private:
   std::mutex m_;
   std::int32_t periodClk_;
+  bool raw_;
   std::map<std::uint32_t, std::vector<std::uint8_t>> pending_;
   std::uint32_t count_ = 0, first_ = 0, changed_ = 0;
 };
@@ -116,8 +130,12 @@ int main(int argc, char** argv) {
   std::string modulesFile;
   double seconds = 20, periodMs = 10;
   std::uint32_t mask = 0xFFFFFFFF;
+  std::int32_t originLatency = kOriginLatencyScanner;
+  bool raw = false, refresh = true;
   for (int k = 1; k < argc; ++k) {
     const char* a = argv[k];
+    if (!std::strcmp(a, "-raw")) { raw = true; continue; }
+    if (!std::strcmp(a, "-norefresh")) { refresh = false; continue; }
     if (k + 1 >= argc) {
       std::fprintf(stderr, "%s needs a value\n", a);
       return 2;
@@ -127,6 +145,7 @@ int main(int argc, char** argv) {
     else if (!std::strcmp(a, "-s")) seconds = std::atof(v);
     else if (!std::strcmp(a, "-period")) periodMs = std::atof(v);
     else if (!std::strcmp(a, "-mask")) mask = std::strtoul(v, nullptr, 0);
+    else if (!std::strcmp(a, "-olat")) originLatency = std::atoi(v);
     else {
       std::fprintf(stderr, "unknown option %s\n", a);
       return 2;
@@ -142,6 +161,11 @@ int main(int argc, char** argv) {
     return 2;
   }
   const auto n = static_cast<std::int32_t>(samples);
+  if (!refresh && kT0 + samples * periodClk >= 2147483647.0) {
+    std::fprintf(stderr, "-norefresh: -s must stay below 21 s (signed 32-bit "
+                         "timeline)\n");
+    return 2;
+  }
 
   std::vector<probe::Endpoint> modules;
   if (!modulesFile.empty()) {
@@ -160,12 +184,15 @@ int main(int argc, char** argv) {
       "UIO",
       _function(
           _for(i = 0, i < n, ++i)(
-              resume(kT0),
+              // -norefresh: one timeline from the start (as scanner run 2)
+              resume(refresh ? ExpressionBuilder(kT0)
+                             : ExpressionBuilder(kT0 + i * periodClk)),
               v = input(static_cast<std::int32_t>(mask)),
               sendl(kData | (v & 0x3FFF)),
               sendl(kData | ((v >> 14) & 0x3FFF)),
               sendl(kData | ((v >> 28) & 0xF)),
-              origin(periodClk - kOriginLatency)),
+              refresh ? StatementBuilder(origin(periodClk - originLatency))
+                      : StatementBuilder(_null())),
           ppl::exit(0)));
 
   // Rx stops after n samples. Scanner runs 1 and 2 ended on an end-marker
@@ -189,11 +216,15 @@ int main(int argc, char** argv) {
       _filter::Transparent());
   _sequence seq(std::move(uio), std::move(rx));
 
+  const std::string timing =
+      refresh ? "origin refresh, latency " + std::to_string(originLatency)
+              : std::string("no origin refresh");
   std::printf("uio probe: %d samples every %.3f ms (%.3f s), mask 0x%08X, "
-              "modules %s\n",
+              "%s, modules %s\n",
               n, periodClk / kClockHz * 1e3, n * (periodClk / kClockHz), mask,
+              timing.c_str(),
               modulesFile.empty() ? "simulator" : modulesFile.c_str());
-  Printer printer(periodClk);
+  Printer printer(periodClk, raw);
   AcquisitionDataPump pump(&printer);
   std::thread worker;
   auto s = modules.empty() ? probe::Session() : probe::Session(modules);
