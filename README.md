@@ -120,7 +120,7 @@ Keys (all optional; unknown keys, bad numbers, unknown PTS masks and bad address
 | `rf.frequency_hz` | `-f` (number) | NCO frequency (> 0) = offset from the PTS base, added or subtracted per the table, Tx and Rx |
 | `rf.max_amplitude_hz` | `-rfmax` | B1 in Hz at full-scale RF |
 | `gradients.max_hz_per_m.{x,y,z}` | `-gx -gy -gz` | Hz/m at full-scale DAC |
-| `channels.tx_mask`, `rx_mask` | `-txmask -rxmask` | bit *i* = channel *i* (as the vendor; only 1 supported yet) |
+| `channels.tx_mask`, `rx_mask` | `-txmask -rxmask` | bit *i* = channel *i* (as the vendor GUI); one bit each (1, 2, 4, 8) picks the Tx/Rx channel, e.g. `rx_mask: 4` for 13C on the dual-tuned 1H/13C coil (channel 3) |
 | `receiver.cic` | `-cic` | `on`/`off` |
 | `modules` (list of `{name, ip, port}`) or `modules_file` | `-m` | first module = master; `-m` replaces the list |
 | `advanced.{emit, t0_clocks, epoch_clocks, timeout_s, allow_late, stdout}` | `-emit -t0 -epoch -timeout -allow-late -stdout` | testing options |

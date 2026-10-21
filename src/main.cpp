@@ -34,8 +34,8 @@ void Usage(const char* argv0) {
       "  -o       output-file (writes <output-file>_0.cfl)\n"
       "  -stdout  write data to standard output\n"
       "  -rfmax   max-rf-amp-hz\n"
-      "  -rxmask  receiver-mask, bit i = receiver i (only 1 is supported yet)\n"
-      "  -txmask  transmitter-mask, bit i = transmitter i (only 1 supported yet)\n"
+      "  -rxmask  receiver-mask, bit i = receiver i (one bit: 1, 2, 4 or 8)\n"
+      "  -txmask  transmitter-mask, bit i = transmitter i (one bit: 1, 2, 4 or 8)\n"
       "  -cic     on/off\n"
       "  -gx      max-gradient-amp-hz/m\n"
       "  -gy      max-gradient-amp-hz/m\n"
@@ -198,11 +198,20 @@ int main(int argc, char** argv) {
                                "conjugated)"
                              : "");
 
-  if (rxMask != 1 || txMask != 1) {
-    std::fprintf(stderr, "error: only -rxmask 1 and -txmask 1 are supported "
-                         "yet (several channels: Phase 4)\n");
+  // One receiver and one transmitter, on the channel of the single mask bit
+  // (as the vendor GUI: 13C on the dual-tuned coil is Rx channel 3 = mask 4).
+  auto singleBit = [](unsigned long m) { return m != 0 && (m & (m - 1)) == 0 && m <= 8; };
+  if (!singleBit(rxMask) || !singleBit(txMask)) {
+    std::fprintf(stderr, "error: -rxmask and -txmask must each select one "
+                         "channel (1, 2, 4 or 8); several channels: Phase 4\n");
     return 2;
   }
+  for (unsigned b = 0; b < 4; ++b) {
+    if (rxMask >> b & 1) ro.rxChannel = b;
+    if (txMask >> b & 1) ro.txChannel = b;
+  }
+  std::fprintf(log, "channels: Tx %u (tx_mask %lu), Rx %u (rx_mask %lu)\n",
+               ro.txChannel, txMask, ro.rxChannel, rxMask);
   if (!dryRun && modulesFile.empty() && ro.modules.empty()) {
     std::fprintf(stderr, "error: no modules: give -m module-configuration-file, "
                          "or 'modules'/'modules_file' in the settings file\n");

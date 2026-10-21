@@ -184,12 +184,12 @@ int Run(const realtime::Program& program, const RunOptions& o) {
   std::map<std::string, Placement> placed;
   for (const auto& c : program.components) {
     std::optional<std::string> mod;
-    mp::ModuleChannel ch = mp::ModuleChannel::Transmitter(0);
+    mp::ModuleChannel ch = mp::ModuleChannel::Transmitter(o.txChannel);
     switch (c.role) {
       case realtime::Role::kTx: mod = txMod; break;
       case realtime::Role::kRx:
         mod = rxMod;
-        ch = mp::ModuleChannel::Receiver(0);
+        ch = mp::ModuleChannel::Receiver(o.rxChannel);
         break;
       case realtime::Role::kGradA:
         mod = gradMod;

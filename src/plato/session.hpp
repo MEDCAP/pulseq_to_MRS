@@ -36,6 +36,8 @@ struct RunOptions {
   double timeoutSeconds = 0;  // 0 = sequence duration + 10 s
   double sequenceSeconds = 0;
   std::FILE* log = stdout;    // diagnostics (stderr with -stdout)
+  unsigned txChannel = 0;     // -txmask bit: transmitter channel on the Tx module
+  unsigned rxChannel = 0;     // -rxmask bit: receiver channel on the Rx module
   bool conjugateData = false; // low-side PTS: write conj(samples), so +Hz in
                               // the data is a higher physical frequency
 };
