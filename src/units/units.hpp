@@ -57,12 +57,28 @@ std::uint32_t PhaseWord16(double rad);
 // 32-bit resetosc phase, 2^32 = 2 pi, wrapped.
 std::uint32_t PhaseWord32(double rad);
 
-// PTS synthesizer base frequency selected by a pts_mask, per the table in
-// C:\smis\smis.ini (170 MHz: 15, 230 MHz: 93, 250 MHz: 109, 270 MHz: 77,
-// 370 MHz: 13). The physical RF frequency is base + the NCO frequency (-f).
-// pts_mask 0 means no PTS (base 0, e.g. the simulator). nullopt for a mask
-// not in the table.
-std::optional<double> PtsBaseFrequencyHz(unsigned long ptsMask);
+// PTS synthesizer setting selected by a pts_mask, per the table in the
+// scanner's C:\smis\smis.ini [PplVars]: 77 = 270 MHz (1H, 270 + 30 = 300),
+// 109 = 250 MHz (19F, 250 + 30), 47 = 150 MHz (31P, 150 - 29), 190 = 104 MHz
+// (13C, 104 - 29 = 75), 63 = 114 MHz (129Xe, 114 - 32), 107 = 58 MHz (15N,
+// 58 - 28). The physical RF frequency is base + sign * NCO (-f, positive):
+// the high-side masks add the NCO, the low-side ones subtract it, so there a
+// physical offset +d needs NCO - d and phases / spectra are mirrored.
+// pts_mask 0 means no PTS (base 0, sign +1, e.g. the simulator). nullopt for a
+// mask not in the table (110 = 54 MHz is marked DO NOT USE there).
+struct PtsSetting {
+  double baseHz = 0;
+  int sign = +1;  // +1: base + NCO, -1: base - NCO
+};
+std::optional<PtsSetting> LookupPts(unsigned long ptsMask);
+inline std::optional<double> PtsBaseFrequencyHz(unsigned long ptsMask) {
+  const auto p = LookupPts(ptsMask);
+  return p ? std::optional<double>(p->baseHz) : std::nullopt;
+}
+// The known masks, for error messages.
+inline constexpr const char* kPtsMaskList =
+    "0 = none, 77 = 270 MHz, 109 = 250 MHz, 47 = 150 MHz (-NCO), "
+    "190 = 104 MHz (-NCO), 63 = 114 MHz (-NCO), 107 = 58 MHz (-NCO)";
 
 // Physical amplitude as a fraction of full scale. Throws UnitError if
 // |value| > fullScale * (1 + 1e-6) (tiny float round-off is clamped).

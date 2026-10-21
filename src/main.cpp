@@ -177,21 +177,26 @@ int main(int argc, char** argv) {
   ro.log = log;
 
   // Frequency: the PTS synthesizer gives the base (pts_mask, driven on UIO
-  // bits 8-15 like the vendor), the NCO adds -f. The NCO is programmed with
-  // -f; the physical frequency base + -f is what the Pulseq 1.5 ppm offsets
-  // scale with.
-  const auto base = pp::units::PtsBaseFrequencyHz(ptsMask);
-  if (!base) {
-    std::fprintf(stderr, "error: -ptsmask %lu is not a known PTS setting (0 = "
-                         "none, 15 = 170 MHz, 93 = 230 MHz, 109 = 250 MHz, 77 = "
-                         "270 MHz, 13 = 370 MHz)\n", ptsMask);
+  // bits 8-15 like the vendor), the NCO adds -f, or subtracts it for the
+  // low-side masks (13C etc.). The NCO is programmed with -f; the physical
+  // frequency base +- -f is what the Pulseq 1.5 ppm offsets scale with.
+  const auto pts = pp::units::LookupPts(ptsMask);
+  if (!pts) {
+    std::fprintf(stderr, "error: -ptsmask %lu is not a known PTS setting (%s)\n",
+                 ptsMask, pp::units::kPtsMaskList);
     return 2;
   }
-  lo.larmorHz = *base + cfg.larmorHz;
+  lo.larmorHz = pts->baseHz + pts->sign * cfg.larmorHz;
+  cfg.sideband = pts->sign;
+  ro.conjugateData = pts->sign < 0;
   po.uioOutWord = static_cast<std::uint32_t>(ptsMask) << 8;
-  std::fprintf(log, "frequency: PTS base %.6f MHz (pts_mask %lu) + NCO %.6f MHz "
-                    "= %.6f MHz\n",
-               *base * 1e-6, ptsMask, cfg.larmorHz * 1e-6, lo.larmorHz * 1e-6);
+  std::fprintf(log, "frequency: PTS base %.6f MHz (pts_mask %lu) %c NCO %.6f MHz "
+                    "= %.6f MHz%s\n",
+               pts->baseHz * 1e-6, ptsMask, pts->sign < 0 ? '-' : '+',
+               cfg.larmorHz * 1e-6, lo.larmorHz * 1e-6,
+               pts->sign < 0 ? " (low side: offsets and phases mirrored, data "
+                               "conjugated)"
+                             : "");
 
   if (rxMask != 1 || txMask != 1) {
     std::fprintf(stderr, "error: only -rxmask 1 and -txmask 1 are supported "

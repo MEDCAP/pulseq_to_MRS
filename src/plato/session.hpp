@@ -36,6 +36,8 @@ struct RunOptions {
   double timeoutSeconds = 0;  // 0 = sequence duration + 10 s
   double sequenceSeconds = 0;
   std::FILE* log = stdout;    // diagnostics (stderr with -stdout)
+  bool conjugateData = false; // low-side PTS: write conj(samples), so +Hz in
+                              // the data is a higher physical frequency
 };
 
 // Returns the process exit code: 0 on success.

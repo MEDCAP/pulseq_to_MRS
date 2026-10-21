@@ -104,13 +104,15 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "usage: %s [options] sequence.seq\n", argv[0]);
     return 2;
   }
-  // ppm offsets scale with the physical frequency: PTS base + NCO (-f).
-  const auto base = pp::units::PtsBaseFrequencyHz(ptsMask);
-  if (!base) {
-    std::fprintf(stderr, "unknown -ptsmask %lu\n", ptsMask);
+  // ppm offsets scale with the physical frequency: PTS base +- NCO (-f).
+  const auto pts = pp::units::LookupPts(ptsMask);
+  if (!pts) {
+    std::fprintf(stderr, "unknown -ptsmask %lu (%s)\n", ptsMask,
+                 pp::units::kPtsMaskList);
     return 2;
   }
-  lo.larmorHz = *base + cfg.larmorHz;
+  lo.larmorHz = pts->baseHz + pts->sign * cfg.larmorHz;
+  cfg.sideband = pts->sign;
 
   try {
     const auto m = pp::seq::LoadSequence(path, lo);

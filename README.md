@@ -97,16 +97,18 @@ build/pulseq_plato -f config/sim_reference.yml other.seq -o x   # options on the
 | `config/sim_reference.yml` | The scanner's reference parameters against the **local simulator** (use this for testing). |
 | `config/scanner.yml` | Same parameters with the scanner module addresses from `plato/bin/modules.txt`. **Drives hardware.** It has no `sequence:`, so the `.seq` goes on the command line. |
 
-**Frequency model.** The PTS synthesizer provides the base frequency, selected by `pts_mask` (77 = 270 MHz, per `C:\smis\smis.ini`). The NCO adds `-f`, the offset from the base, on Tx and Rx. With the scanner values that gives 270 MHz + 27.99845 MHz = 297.99845 MHz, and the run prints this sum.
-- The NCO is programmed with `-f`.
-- The Pulseq 1.5 ppm offsets scale with the physical frequency, base + `-f`.
-- Like the vendor, `pts_mask` is written to UIO bits 8–15 (`setout(mask << 8)`, `00004d00` for 77) before the sequence starts and held until it ends. The UIO component exists only when `pts_mask` ≠ 0.
+**Frequency model.** The PTS synthesizer provides the base frequency, selected by `pts_mask` (table from the scanner's `C:\smis\smis.ini [PplVars]`). On Tx and Rx the NCO is programmed with `-f` (positive, the vendor's `DefObserveFrequency`). The high-side masks add it to the base: 1H 270 MHz + 28.037464 MHz = 298.037464 MHz. The low-side masks subtract it: 13C 104 MHz − 29.046641 MHz = 74.953359 MHz. The run prints the result.
+- The Pulseq 1.5 ppm offsets scale with the physical frequency, base ± `-f`.
+- Low side (sign −1): a physical offset +Δ needs NCO −Δ, so every RF/ADC frequency offset, phase offset and RF shape phase is negated (`ScanConfig::sideband`). The received samples are written conjugated, so +Hz in the .cfl is a higher physical frequency, as for 1H.
+- Like the vendor, `pts_mask` is written to UIO bits 8–15 (`setout(mask << 8)`, `00004d00` for 77, `0000be00` for 190) before the sequence starts and held until it ends. The UIO component exists only when `pts_mask` ≠ 0.
 
-| `pts_mask` | 0 | 15 | 93 | 109 | 77 | 13 |
-|---|---|---|---|---|---|---|
-| base | none | 170 MHz | 230 MHz | 250 MHz | 270 MHz | 370 MHz |
+| `pts_mask` | 0 | 77 | 109 | 47 | 190 | 63 | 107 |
+|---|---|---|---|---|---|---|---|
+| base | none | 270 MHz | 250 MHz | 150 MHz | 104 MHz | 114 MHz | 58 MHz |
+| NCO | + | + | + | − | − | − | − |
+| nucleus (7 T) | — | 1H | 19F | 31P | 13C | 129Xe | 15N |
 
-Other masks are refused. (`smis.ini` also mentions 109 for 370 MHz, but 109 is already 250 MHz; 13 is the value it sets.)
+Other masks are refused, including 110 (54 MHz, marked "DO NOT USE" in smis.ini). The earlier table (15 = 170, 93 = 230, 13 = 370 MHz) came from a non-scanner smis.ini.
 
 Keys (all optional; unknown keys, bad numbers, unknown PTS masks and bad addresses are errors with `file:line`):
 
@@ -115,7 +117,7 @@ Keys (all optional; unknown keys, bad numbers, unknown PTS masks and bad address
 | `sequence` | positional | relative to the settings file |
 | `output` | `-o` | relative to the working directory |
 | `rf.pts_mask` | `-ptsmask` | PTS base frequency (table above); hex like `0x4d` is accepted |
-| `rf.frequency_hz` | `-f` (number) | NCO frequency = offset from the PTS base, Tx and Rx |
+| `rf.frequency_hz` | `-f` (number) | NCO frequency (> 0) = offset from the PTS base, added or subtracted per the table, Tx and Rx |
 | `rf.max_amplitude_hz` | `-rfmax` | B1 in Hz at full-scale RF |
 | `gradients.max_hz_per_m.{x,y,z}` | `-gx -gy -gz` | Hz/m at full-scale DAC |
 | `channels.tx_mask`, `rx_mask` | `-txmask -rxmask` | bit *i* = channel *i* (as the vendor; only 1 supported yet) |

@@ -205,6 +205,39 @@ static void Synthetic() {
 
 }
 
+// Low-side PTS (13C, pts_mask 190: physical = base - NCO): offsets and phases
+// are negated, so the physical result is the one written in the .seq.
+static void LowSide() {
+  auto cfg = ReferenceConfig();
+  cfg.sideband = -1;
+  const double pi = std::numbers::pi;
+
+  model::SequenceModel m;
+  m.duration = 100000;
+  m.rf = {Pulse(0, 0, 10000), Pulse(1, 50000, 0)};
+  m.rf[0].phaseOffsetRad = 0.5;
+  m.rf[0].phaseRad.assign(10, 0.25f);
+  auto t = tables::BuildTables(m, cfg);
+  CHECK_NEAR(t.rfLib.points()[0].frequency, -10000 / 200e6, 1e-15);
+  CHECK_NEAR(t.rfLib.points()[0].phase, units::ModulationPhase(-0.25), 1e-7);
+  CHECK_EQ(t.tx[0].w[7], units::PhaseWord16(-0.5));
+  CHECK_EQ(t.tx[1].w[7], units::PhaseWord16(2 * pi * 10000 * 10e-6));
+
+  model::AdcEvent a;
+  a.block = 0;
+  a.start = 1000;
+  a.numSamples = 10;
+  a.dwellClk = 1000;
+  a.freqOffsetHz = 500;
+  a.phaseOffsetRad = 0.25;
+  m.rf.clear();
+  m.adc = {a};
+  t = tables::BuildTables(m, cfg);
+  CHECK_EQ(t.rx[0].w[4], units::FrequencyWord(27995000 - 500, cfg.clocks));
+  CHECK_EQ(t.rx[0].w[5], units::PhaseWord16(-0.25));
+  CHECK_EQ(t.rx[0].w[6], 1000u * 11u + 10000u + 50u);  // restore still set
+}
+
 // Absolute clock of word k of every row (base + value; ORIGIN moves the base).
 static std::vector<long long> Absolute(const std::vector<tables::Row>& rows,
                                        int k, const tables::ScanConfig& cfg) {
@@ -311,6 +344,7 @@ static void Export() {
 }
 
 static void Run() {
+  LowSide();  // synthetic, runs without the test/ data folder
   Fid();
   Export();
   Features();

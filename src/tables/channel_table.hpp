@@ -57,6 +57,11 @@ struct Row {
 struct ScanConfig {
   double larmorHz = 0;                  // -f: NCO frequency (Tx and Rx), the
                                         // offset from the PTS base frequency
+  // PTS sideband (units::PtsSetting::sign): +1 physical = base + NCO, -1
+  // physical = base - NCO (13C etc.). With -1 every frequency offset, phase
+  // offset and RF shape phase is negated, so the physical result is as written
+  // in the .seq; the received data are conjugated (RunOptions).
+  int sideband = +1;
   double rfMaxHz = 0;                   // -rfmax: B1 (Hz) at full-scale RF
   std::array<double, 3> gradMaxHzPerM{0, 0, 0};  // -gx/-gy/-gz at full scale
   bool cicCompensation = false;         // -cic on: FIR decimates by 4

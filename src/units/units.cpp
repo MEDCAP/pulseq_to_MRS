@@ -58,14 +58,15 @@ std::uint32_t PhaseWord32(double rad) {
                                     0xFFFFFFFFull);
 }
 
-std::optional<double> PtsBaseFrequencyHz(unsigned long ptsMask) {
+std::optional<PtsSetting> LookupPts(unsigned long ptsMask) {
   switch (ptsMask) {
-    case 0: return 0.0;
-    case 15: return 170e6;
-    case 93: return 230e6;
-    case 109: return 250e6;
-    case 77: return 270e6;
-    case 13: return 370e6;
+    case 0: return PtsSetting{0.0, +1};
+    case 77: return PtsSetting{270e6, +1};
+    case 109: return PtsSetting{250e6, +1};
+    case 47: return PtsSetting{150e6, -1};
+    case 190: return PtsSetting{104e6, -1};
+    case 63: return PtsSetting{114e6, -1};
+    case 107: return PtsSetting{58e6, -1};
     default: return std::nullopt;
   }
 }

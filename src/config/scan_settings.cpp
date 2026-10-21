@@ -141,10 +141,10 @@ ScanSettings LoadScanSettings(const std::string& path) {
     r.ExpectMap(*rf, "rf", {"pts_mask", "frequency_hz", "max_amplitude_hz"});
     if (const Node* n = rf->Find("pts_mask")) {
       s.ptsMask = r.Mask(*n, "rf.pts_mask");
-      if (!units::PtsBaseFrequencyHz(*s.ptsMask))
+      if (!units::LookupPts(*s.ptsMask))
         r.Fail(*n, "rf.pts_mask " + std::to_string(*s.ptsMask) +
-                       " is not a known PTS setting (0 = none, 15 = 170 MHz, "
-                       "93 = 230 MHz, 109 = 250 MHz, 77 = 270 MHz, 13 = 370 MHz)");
+                       " is not a known PTS setting (" + units::kPtsMaskList +
+                       ")");
     }
     if (const Node* n = rf->Find("frequency_hz"))
       s.frequencyHz = r.Positive(*n, "rf.frequency_hz");
