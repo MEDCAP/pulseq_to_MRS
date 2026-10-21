@@ -133,6 +133,12 @@ static void Errors() {
   // Hex masks and an empty file are fine.
   const auto h = config::LoadScanSettings(WriteTmp("hex.yml", "rf: {pts_mask: 0x4d}\n"));
   CHECK_EQ(*h.ptsMask, 77ul);
+  // 13C on this scanner (smis.ini): 104 MHz - NCO 29046641 Hz.
+  const auto c = config::LoadScanSettings(
+      WriteTmp("c13.yml", "rf: {pts_mask: 190, frequency_hz: 29046641}\n"));
+  CHECK_EQ(*c.ptsMask, 190ul);
+  CHECK_NEAR(*c.frequencyHz, 29046641, 0);
+  CHECK(FailsWith("rf:\n  pts_mask: 15\n", "is not a known PTS setting"));
   const auto e = config::LoadScanSettings(WriteTmp("empty.yml", "# nothing\n"));
   CHECK(!e.frequencyHz.has_value());
 }

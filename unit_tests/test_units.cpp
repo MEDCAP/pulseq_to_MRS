@@ -35,12 +35,17 @@ static void Run() {
   CHECK_NEAR(ModulationPhase(pi / 2), 0.5, 1e-12);
   CHECK_NEAR(ModulationPhase(-pi / 4), -0.25, 1e-12);
 
-  // PTS base frequencies (C:\smis\smis.ini).
+  // PTS settings (the scanner's C:\smis\smis.ini [PplVars]).
   CHECK_NEAR(*PtsBaseFrequencyHz(77), 270e6, 0);
-  CHECK_NEAR(*PtsBaseFrequencyHz(15), 170e6, 0);
-  CHECK_NEAR(*PtsBaseFrequencyHz(13), 370e6, 0);
+  CHECK_EQ(LookupPts(77)->sign, 1);
+  CHECK_NEAR(LookupPts(190)->baseHz, 104e6, 0);  // 13C: 104 - 29 = 75 MHz
+  CHECK_EQ(LookupPts(190)->sign, -1);
+  CHECK_NEAR(LookupPts(109)->baseHz, 250e6, 0);
+  CHECK_EQ(LookupPts(47)->sign, -1);
   CHECK_NEAR(*PtsBaseFrequencyHz(0), 0, 0);
   CHECK(!PtsBaseFrequencyHz(78).has_value());
+  CHECK(!LookupPts(15).has_value());   // not on this scanner
+  CHECK(!LookupPts(110).has_value());  // DO NOT USE in smis.ini
 
   // Full-scale fractions.
   CHECK_NEAR(Fraction(50, 100, "a"), 0.5, 1e-15);

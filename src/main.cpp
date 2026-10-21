@@ -34,8 +34,8 @@ void Usage(const char* argv0) {
       "  -o       output-file (writes <output-file>_0.cfl)\n"
       "  -stdout  write data to standard output\n"
       "  -rfmax   max-rf-amp-hz\n"
-      "  -rxmask  receiver-mask, bit i = receiver i (only 1 is supported yet)\n"
-      "  -txmask  transmitter-mask, bit i = transmitter i (only 1 supported yet)\n"
+      "  -rxmask  receiver-mask, bit i = receiver i (one bit: 1, 2, 4 or 8)\n"
+      "  -txmask  transmitter-mask, bit i = transmitter i (one bit: 1, 2, 4 or 8)\n"
       "  -cic     on/off\n"
       "  -trigger on/off   respiratory triggering: before every excitation\n"
       "           pulse (RF use 'e') wait for UIO input bit 0 to rise\n"
@@ -193,27 +193,41 @@ int main(int argc, char** argv) {
   ro.log = log;
 
   // Frequency: the PTS synthesizer gives the base (pts_mask, driven on UIO
-  // bits 8-15 like the vendor), the NCO adds -f. The NCO is programmed with
-  // -f; the physical frequency base + -f is what the Pulseq 1.5 ppm offsets
-  // scale with.
-  const auto base = pp::units::PtsBaseFrequencyHz(ptsMask);
-  if (!base) {
-    std::fprintf(stderr, "error: -ptsmask %lu is not a known PTS setting (0 = "
-                         "none, 15 = 170 MHz, 93 = 230 MHz, 109 = 250 MHz, 77 = "
-                         "270 MHz, 13 = 370 MHz)\n", ptsMask);
+  // bits 8-15 like the vendor), the NCO adds -f, or subtracts it for the
+  // low-side masks (13C etc.). The NCO is programmed with -f; the physical
+  // frequency base +- -f is what the Pulseq 1.5 ppm offsets scale with.
+  const auto pts = pp::units::LookupPts(ptsMask);
+  if (!pts) {
+    std::fprintf(stderr, "error: -ptsmask %lu is not a known PTS setting (%s)\n",
+                 ptsMask, pp::units::kPtsMaskList);
     return 2;
   }
-  lo.larmorHz = *base + cfg.larmorHz;
+  lo.larmorHz = pts->baseHz + pts->sign * cfg.larmorHz;
+  cfg.sideband = pts->sign;
+  ro.conjugateData = pts->sign < 0;
   po.uioOutWord = static_cast<std::uint32_t>(ptsMask) << 8;
-  std::fprintf(log, "frequency: PTS base %.6f MHz (pts_mask %lu) + NCO %.6f MHz "
-                    "= %.6f MHz\n",
-               *base * 1e-6, ptsMask, cfg.larmorHz * 1e-6, lo.larmorHz * 1e-6);
+  std::fprintf(log, "frequency: PTS base %.6f MHz (pts_mask %lu) %c NCO %.6f MHz "
+                    "= %.6f MHz%s\n",
+               pts->baseHz * 1e-6, ptsMask, pts->sign < 0 ? '-' : '+',
+               cfg.larmorHz * 1e-6, lo.larmorHz * 1e-6,
+               pts->sign < 0 ? " (low side: offsets and phases mirrored, data "
+                               "conjugated)"
+                             : "");
 
-  if (rxMask != 1 || txMask != 1) {
-    std::fprintf(stderr, "error: only -rxmask 1 and -txmask 1 are supported "
-                         "yet (several channels: Phase 4)\n");
+  // One receiver and one transmitter, on the channel of the single mask bit
+  // (as the vendor GUI: 13C on the dual-tuned coil is Rx channel 3 = mask 4).
+  auto singleBit = [](unsigned long m) { return m != 0 && (m & (m - 1)) == 0 && m <= 8; };
+  if (!singleBit(rxMask) || !singleBit(txMask)) {
+    std::fprintf(stderr, "error: -rxmask and -txmask must each select one "
+                         "channel (1, 2, 4 or 8); several channels: Phase 4\n");
     return 2;
   }
+  for (unsigned b = 0; b < 4; ++b) {
+    if (rxMask >> b & 1) ro.rxChannel = b;
+    if (txMask >> b & 1) ro.txChannel = b;
+  }
+  std::fprintf(log, "channels: Tx %u (tx_mask %lu), Rx %u (rx_mask %lu)\n",
+               ro.txChannel, txMask, ro.rxChannel, rxMask);
   if (!dryRun && modulesFile.empty() && ro.modules.empty()) {
     std::fprintf(stderr, "error: no modules: give -m module-configuration-file, "
                          "or 'modules'/'modules_file' in the settings file\n");

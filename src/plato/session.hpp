@@ -37,6 +37,10 @@ struct RunOptions {
   double sequenceSeconds = 0;
   int gates = 0;              // respiratory gates: the run waits for each
   std::FILE* log = stdout;    // diagnostics (stderr with -stdout)
+  unsigned txChannel = 0;     // -txmask bit: transmitter channel on the Tx module
+  unsigned rxChannel = 0;     // -rxmask bit: receiver channel on the Rx module
+  bool conjugateData = false; // low-side PTS: write conj(samples), so +Hz in
+                              // the data is a higher physical frequency
 };
 
 // Returns the process exit code: 0 on success.

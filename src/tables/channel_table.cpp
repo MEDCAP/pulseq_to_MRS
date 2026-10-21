@@ -177,7 +177,11 @@ void BuildTx(const model::SequenceModel& m, const ScanConfig& cfg,
       throw TableError("RF raster must be an even number of clocks");
     const auto n = static_cast<Clk>(rf.magnitude.size());
     const Clk at = cfg.startOffset + rf.start + r / 2;  // sample centres
-    const double freq = units::ModulationFrequency(rf.freqOffsetHz, cfg.clocks);
+    // Low-side PTS (sideband -1): the NCO runs mirrored, so offsets and
+    // phases change sign (ScanConfig::sideband).
+    const double s = cfg.sideband;
+    const double freqOffsetHz = s * rf.freqOffsetHz;
+    const double freq = units::ModulationFrequency(freqOffsetHz, cfg.clocks);
 
     // rf() applies freq as setfreqofs, so the NCO integrates the offset while
     // the pulse plays; subtracting the phase accumulated by earlier pulses
@@ -187,7 +191,7 @@ void BuildTx(const model::SequenceModel& m, const ScanConfig& cfg,
     // the waveform keeps only the shape phase, so pulses that differ only in
     // phase (RF spoiling) share one library waveform.
     const std::uint32_t phaseWord =
-        units::PhaseWord16(rf.phaseOffsetRad - accPhase);
+        units::PhaseWord16(s * rf.phaseOffsetRad - accPhase);
     std::vector<shapes::ModPoint> pts;
     pts.reserve(rf.magnitude.size() + 1);
     for (std::size_t k = 0; k < rf.magnitude.size(); ++k) {
@@ -195,7 +199,7 @@ void BuildTx(const model::SequenceModel& m, const ScanConfig& cfg,
           {std::clamp(units::Fraction(rf.amplitudeHz * rf.magnitude[k], rfFull,
                                       "RF amplitude") * rfFull / cfg.rfMaxHz,
                       -1.0, 1.0),
-           units::ModulationPhase(rf.phaseRad[k]),
+           units::ModulationPhase(s * rf.phaseRad[k]),
            freq});
     }
     pts.push_back({0, 0, 0});  // outputs hold their last value (FINDINGS S6)
@@ -226,7 +230,7 @@ void BuildTx(const model::SequenceModel& m, const ScanConfig& cfg,
     row.block = rf.block;
     out.push_back(row);
     prevLast = gateOff;
-    accPhase += kTwoPi * rf.freqOffsetHz * static_cast<double>(n * r) /
+    accPhase += kTwoPi * freqOffsetHz * static_cast<double>(n * r) /
                 cfg.clocks.rtClockHz;
   }
   if (clipped) {
@@ -339,12 +343,15 @@ void BuildRx(const model::SequenceModel& m, const ScanConfig& cfg,
     // what earlier ADCs accumulated; its own share is added after the row.
     // The restore cannot share a clock with the last latch (acquire2 returns
     // after it), so it follows rxRestoreHoldClk later.
+    // Low-side PTS: mirrored NCO, as in BuildTx.
+    const double s = cfg.sideband;
+    const double freqOffsetHz = s * a.freqOffsetHz;
     const Clk restoreAt =
         a.freqOffsetHz != 0 ? lastSample + cfg.rxRestoreHoldClk : 0;
     const std::uint32_t phaseWord =
-        units::PhaseWord16(a.phaseOffsetRad - accPhase);
+        units::PhaseWord16(s * a.phaseOffsetRad - accPhase);
     if (restoreAt != 0)
-      accPhase += kTwoPi * a.freqOffsetHz *
+      accPhase += kTwoPi * freqOffsetHz *
                   static_cast<double>(restoreAt - freqAt) /
                   cfg.clocks.rtClockHz;
     CheckSlack("Rx", a.block, prevLast, freqAt, cfg.rxSlackClk, t);
@@ -352,7 +359,7 @@ void BuildRx(const model::SequenceModel& m, const ScanConfig& cfg,
     row.row.w = {static_cast<std::uint32_t>(RowKind::kAdc), 0,
                  static_cast<std::uint32_t>(a.numSamples),
                  static_cast<std::uint32_t>(d),
-                 units::FrequencyWord(cfg.larmorHz + a.freqOffsetHz, cfg.clocks),
+                 units::FrequencyWord(cfg.larmorHz + freqOffsetHz, cfg.clocks),
                  phaseWord, 0, static_cast<std::uint32_t>(grid)};
     row.SetTime(1, at);
     if (restoreAt != 0) row.SetTime(6, restoreAt);  // 0 = no restore

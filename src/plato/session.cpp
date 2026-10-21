@@ -89,7 +89,7 @@ namespace {
 // big-endian words, I then Q (FINDINGS R3). The sequence appends no metadata.
 class CflWriter : public mp::AcquisitionDataPump::Delegate {
 public:
-  explicit CflWriter(std::FILE* out) : out_(out) {}
+  CflWriter(std::FILE* out, bool conjugate) : out_(out), conj_(conjugate) {}
 
   void AcquisitionDataPump_Submit(mp::AcquisitionDataPump*, unsigned,
                                   std::uint32_t acqId,
@@ -148,12 +148,14 @@ private:
     for (std::size_t k = 0; k + 6 <= bytes.size(); k += 6) {
       iq.push_back(static_cast<float>(S24(&bytes[k])));
       iq.push_back(static_cast<float>(S24(&bytes[k + 3])));
+      if (conj_) iq.back() = -iq.back();
     }
     if (out_) std::fwrite(iq.data(), sizeof(float), iq.size(), out_);
     samplesWritten_ += iq.size() / 2;
   }
 
   std::FILE* out_;
+  bool conj_;
   std::mutex m_;
   std::condition_variable cv_;
   std::map<std::uint32_t, Acq> pending_;
@@ -207,12 +209,12 @@ int Run(const realtime::Program& program, const RunOptions& o) {
   std::map<std::string, Placement> placed;
   for (const auto& c : program.components) {
     std::optional<std::string> mod;
-    mp::ModuleChannel ch = mp::ModuleChannel::Transmitter(0);
+    mp::ModuleChannel ch = mp::ModuleChannel::Transmitter(o.txChannel);
     switch (c.role) {
       case realtime::Role::kTx: mod = txMod; break;
       case realtime::Role::kRx:
         mod = rxMod;
-        ch = mp::ModuleChannel::Receiver(0);
+        ch = mp::ModuleChannel::Receiver(o.rxChannel);
         break;
       case realtime::Role::kGradA:
         mod = gradMod;
@@ -278,7 +280,7 @@ int Run(const realtime::Program& program, const RunOptions& o) {
       return 1;
     }
   }
-  CflWriter writer(data);
+  CflWriter writer(data, o.conjugateData);
   mp::AcquisitionDataPump pump(&writer);
   std::thread pumpThread;
   const bool hasRx = o.expectedSamples > 0;
