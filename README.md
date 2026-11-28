@@ -4,9 +4,6 @@ Runs Pulseq 1.5 `.seq` files on PLATO spectrometers (MR46xx) or `simulator.exe`.
 It is our own replacement for `plato\bin\pulseq.exe`. The only API reference is
 `C:\mrs\plato` (docs, headers, libs).
 
-Plan: `C:\Users\kento\.claude\plans\i-want-to-get-keen-music.md`.
-Measured PLATO behaviour: [test/FINDINGS.md](test/FINDINGS.md).
-
 ## Design in one paragraph
 
 The block loop from `parsemr.cpp` (`GetBlock` / `decodeBlock`) runs on the **host** at build time:
@@ -22,25 +19,6 @@ Each PLATO channel (Tx, Rx, GA/GB/GC) then runs one small **realtime block loop*
 - play it with `rf(lib + off, n − 1, …)`, `gradient(…)` or `acquire2(…)` at its absolute `at`
 
 The program size stays fixed whatever the sequence length. All data lives in stream memory.
-
-## Status
-
-- [x] Phase 0: simulator probes (experiments/, see test/FINDINGS.md). The vendor reference run works (`test/setup_ref.sh`).
-- [x] Toolchain: builds with the vendor MSYS2 in `C:\smis\msys64\ucrt64` (g++ 13.1). Phase 0 logs are unchanged against `test/golden/phase0` (`test/regress_phase0.sh`).
-- [x] Phase 1: host core. Loader, model, units, waveform libraries and channel tables, plus unit tests and `pulseq_plato_dump`.
-- [x] Phase 2: FID end to end. `pulseq_plato.exe` runs the unrolled and block-loop programs on the simulator, and both give identical logs. The FID matches the vendor log (ADC times and gradients exact, RF within 0.3 %). The pump writes `<o>_0.cfl`. `test/regress_phase2.sh` checks everything (16 checks).
-- [x] Phase 3: real sequences.
-  - The scanner-proven vendor GRE (`gre_fromMRS_64.seq`) runs with your scanner's parameters, all 830 events on time, and matches the vendor log.
-  - `origin()` rebasing: a 24 s run is on time past the 32-bit timeline, and forced rebasing gives identical logs.
-  - Short-gap stress measured the per-channel row slack.
-  - Memory is logged, and the RF phase is set with `setph`, so spoiled pulses share one waveform.
-  - `test/regress_phase3.sh` runs 19 checks.
-- [x] Phase 4 (scoped to your GRE examples, which use no extensions):
-  - All 19 `.seq` files in `C:\Users\kento\dev\pulseq\matlab\dev\GRE2d` run on the simulator with every row on time and every sample (`test/run_folder.sh`).
-  - RF up to 1 % over `-rfmax` is clipped, as the vendor does; more is refused with the `-rfmax` needed.
-- [ ] Later: several receivers, extensions (rotation, trigger, soft delay), PowerScan plugin
-
-
 
 ## Build and test (Git Bash)
 
